@@ -1161,12 +1161,10 @@ function renderStars() {
   fillFilterStars($('projectPop'));
   const chipLabel = $('projectChipLabel');
   if (chipLabel) chipLabel.textContent = state.filter ? state.filter : '全部项目';
-  const grabName = $('grabProjectName');
-  if (grabName) grabName.textContent = state.filter ? state.filter : '全部项目';
   const chip = $('btnProjectChip');
   if (chip) chip.classList.toggle('on', !!state.filter || isProjectPopOpen());
 }
-/* header 状态同步：蝴蝶灯取 card.runtimeState；meter（ticks+score）由 renderCard/renderProjectActivityCard 填充 */
+/* header 状态同步：蝴蝶灯取 card.runtimeState */
 function syncGrabHeader() {
   const card = $('card');
   const led = $('grabLed');
@@ -1458,9 +1456,7 @@ function renderProjectActivityCard(activity) {
       </div></div>
       <div class="foot"><span class="fid">${esc(activity.sessionId || 'session')}</span><span id="runtime-updated" class="when">更新于 ${esc(relTime(updatedAt)) || '—'}</span></div>
     </div>`;
-  /* 项目级会话：header meter 显示 AI（无 lane 进度） */
-  const grabMeter = $('grabMeter');
-  if (grabMeter) grabMeter.innerHTML = `<span class="ticks"><i class="c"></i></span><span class="score">AI</span>`;
+
 }
 
 function renderCard(t, projectActivity) {
@@ -1497,12 +1493,6 @@ function renderCard(t, projectActivity) {
       card.classList.toggle(`state-${name}`, displayState.replaceAll('_', '-') === name || (name === 'done' && displayState === 'turn_done'));
     }
     renderPost(t);
-    const lane = Math.min(3, Math.max(0, t.lane ?? 0));
-    const n = lane + 1;
-    const ticks = LANES.map((_, i) => {
-      const cls = (i < lane || t.kind === 'done') ? 'f' : (i === lane && t.kind !== 'done' ? 'c' : '');
-      return `<i class="${cls}"></i>`;
-    }).join('');
     const archiveReceipt = archiveReceiptFor(fKey);
     const actionLabel = rt.action ? (ACTION_COPY[rt.action] || rt.action) : '';
     const semanticActivity = archiveReceipt ? '已归档' : displayActivity(
@@ -1554,9 +1544,7 @@ function renderCard(t, projectActivity) {
           <span id="runtime-updated" class="when">更新于 ${esc(relTime(updatedAt)) || '—'}</span>
         </div>
       </div>`;
-    /* header meter：ticks 刻度 + score 百分比（原 .head observe-head 内容平移到 header） */
-    const grabMeter = $('grabMeter');
-    if (grabMeter) grabMeter.innerHTML = `<span class="ticks">${ticks}</span><span class="score">${n}<em>/4</em></span>`;
+
     /* 子任务 bar：点击展开/收起清单（直接切 class 保住过渡动画） */
     const box = $('subsBox');
     if (box) {
@@ -1842,8 +1830,11 @@ function sendFitWindow(h) {
 }
 function applyFlipCard() {
   $('card').classList.toggle('flipped', state.flipped);
-  $('btnFlip').innerHTML = `${icon(state.flipped ? 'chevron-left' : 'book-open', 13)}<span>${state.flipped ? '返回' : '详情'}</span>`;
-  $('btnFlip').setAttribute('aria-label', state.flipped ? '返回任务观察' : '打开任务详情');
+  const btnFlip = $('btnFlip');
+  if (btnFlip) {
+    btnFlip.innerHTML = `${icon(state.flipped ? 'chevron-left' : 'book-open', 13)}<span>${state.flipped ? '返回' : '详情'}</span>`;
+    btnFlip.setAttribute('aria-label', state.flipped ? '返回任务观察' : '打开任务详情');
+  }
   syncFit();
 }
 function openUnreadActivity() {
@@ -1941,9 +1932,61 @@ function renderBack(t, docs, loading, error) {
   const runtimeTrail = rt.agent
     ? `<li><i></i>${esc(DISPLAY_COPY[rt.displayState] || rt.displayState)} · ${esc(rt.agent.toolName || rt.action || 'Agent')} · ${esc(relTime((rt.agent.updatedAt || 0) * 1000) || '刚刚')}</li>`
     : '<li><i></i>暂无实时 Agent 事件</li>';
-  /* 文档标签：默认选中 PRD（或第一个），切换记忆在本次聚焦内 */
+  /* 约束规范展示（Trellis 0.7 动态 Spec paths 命中 + 显式 specRefs） */
+  let governingHtml = '';
+  const projSpecs = (t.project && state.specsByProject[t.project]) || [];
+  let matchedSpecs = [];
+  if (projSpecs.length) {
+    matchedSpecs = projSpecs.filter(s => {
+      if ((t.specRefs || []).some(r => r === s.path || r.endsWith(s.path))) return true;
+      if (s.paths && s.paths.length) {
+        return (t.fileRefs || []).some(f => s.paths.some(p => globMatch(p, f)));
+      }
+      return false;
+    });
+  }
+
+  /* 检查当前是否选中了某个规范进行就地预览 */
+  let activeSpec = null;
+  if (state.docSel && state.docSel.startsWith('spec:')) {
+    const specPath = state.docSel.slice(5);
+    activeSpec = matchedSpecs.find(s => s.path === specPath)
+      || projSpecs.find(s => s.path === specPath);
+    if (!activeSpec) {
+      state.docSel = null;
+    }
+  }
+
+  if (matchedSpecs.length) {
+    governingHtml = `<div class="governing-specs">
+      <div class="b-label">约束规范 · ${matchedSpecs.length}</div>
+      <div class="governing-specs-chips">${matchedSpecs.map(s => {
+        const isActive = activeSpec && activeSpec.path === s.path;
+        return `<button type="button" class="governing-spec-chip${isActive ? ' on' : ''}" data-spec-path="${esc(s.path)}" title="${esc(s.path)}${s.paths && s.paths.length ? `&#10;约束: ${esc(s.paths.join(', '))}` : ''}&#10;点击在下方预览规范文档">
+          <span class="spec-chip-icon" aria-hidden="true">${icon('book-open', 11)}</span>
+          <span>${esc(s.name)}</span>
+          ${isActive ? '<span class="spec-chip-status" aria-hidden="true">预览中</span>' : ''}
+        </button>`;
+      }).join('')}</div>
+    </div>`;
+  }
+
+  /* 文档标签与主体：若有选中的约束规范，优先就地渲染该规范并保持原有 tabs 可点击切换回 */
   let docsHtml = '';
-  if (loading) {
+  if (activeSpec) {
+    const tabs = (docs && docs.length) ? docs.map(d =>
+      `<button type="button" class="dtab" data-doc="${esc(d.name)}">${esc(d.label)}</button>`
+    ).join('') : '';
+    docsHtml = `
+      ${tabs ? `<div class="dtabs">${tabs}</div>` : ''}
+      <div class="spec-preview-banner">
+        <span class="spec-preview-tag">${icon('book-open', 11)} 规范约束</span>
+        <strong class="spec-preview-title">${esc(activeSpec.name)}</strong>
+        <span class="spec-preview-path" title="${esc(activeSpec.path)}">${esc(activeSpec.path)}</span>
+        <button type="button" class="spec-preview-close" data-close-spec title="退出规范预览，返回任务文档">×</button>
+      </div>
+      <div class="doc">${mdRender(activeSpec.content || '（该规范文档暂无内容）')}</div>`;
+  } else if (loading) {
     docsHtml = '<div class="doc dim">文档加载中…</div>';
   } else if (error) {
     docsHtml = [
@@ -1963,26 +2006,6 @@ function renderBack(t, docs, loading, error) {
     docsHtml = `
       <div class="dtabs">${tabs}</div>
       <div class="doc">${mdRender(sel.content)}</div>`;
-  }
-  /* 约束规范展示（Trellis 0.7 动态 Spec paths 命中 + 显式 specRefs） */
-  let governingHtml = '';
-  const projSpecs = (t.project && state.specsByProject[t.project]) || [];
-  if (projSpecs.length) {
-    const matchedSpecs = projSpecs.filter(s => {
-      if ((t.specRefs || []).some(r => r === s.path || r.endsWith(s.path))) return true;
-      if (s.paths && s.paths.length) {
-        return (t.fileRefs || []).some(f => s.paths.some(p => globMatch(p, f)));
-      }
-      return false;
-    });
-    if (matchedSpecs.length) {
-      governingHtml = `<div class="governing-specs">
-        <div class="b-label">约束规范 · ${matchedSpecs.length}</div>
-        <div class="governing-specs-chips">${matchedSpecs.map(s =>
-          `<span class="governing-spec-chip" title="${esc(s.path)}${s.paths && s.paths.length ? `&#10;约束: ${esc(s.paths.join(', '))}` : ''}">${esc(s.name)}</span>`
-        ).join('')}</div>
-      </div>`;
-    }
   }
   const detailMetrics = metricTags(t);
   const inspectMode = state.evidenceTarget && keyOf(state.evidenceTarget) === keyOf(t) ? 'evidence' : 'detail';
@@ -2016,6 +2039,26 @@ function renderBack(t, docs, loading, error) {
       ${runtimeEvidence}
       ${docsHtml}
     </div>`;
+  /* 约束规范芯片点击：就地在下方文档区预览规范内容，再次点击切回默认文档 */
+  back.querySelectorAll('.governing-spec-chip').forEach(btn => {
+    btn.onclick = () => {
+      const specPath = btn.dataset.specPath;
+      if (state.docSel === 'spec:' + specPath) {
+        state.docSel = docs && docs[0] ? docs[0].name : null;
+      } else {
+        state.docSel = 'spec:' + specPath;
+      }
+      renderBack(t, docs, false, error);
+    };
+  });
+  /* 规范预览条关闭按钮：退出规范预览，切回默认文档 */
+  const closeSpecBtn = back.querySelector('[data-close-spec]');
+  if (closeSpecBtn) {
+    closeSpecBtn.onclick = () => {
+      state.docSel = docs && docs[0] ? docs[0].name : null;
+      renderBack(t, docs, false, error);
+    };
+  }
   /* 标签切换：直接从缓存取，无网络往返 */
   back.querySelectorAll('.dtab').forEach(btn => {
     btn.onclick = () => {
@@ -2109,7 +2152,7 @@ function renderTree(focused) {
     for (const t of un) {
       if ((KIND_URGENCY[t.kind] ?? 9) < (KIND_URGENCY[best] ?? 9)) best = t.kind;
     }
-    const c = un.length ? (KIND_COLOR[best] || '#a6a7ae') : '#63656e';
+    const c = un.length ? (KIND_COLOR[best] || '#a6a7ae') : '#8a8d9b';
     const head = document.createElement('div');
     head.className = 'proj-h';
     head.innerHTML = `<span class="d" style="background:${c};color:${c}"></span>${esc(name)}<span class="cnt">${shown.length}</span>`;
@@ -2388,7 +2431,7 @@ function renderRelations(focused) {
     const statusColor = t.status === 'completed' || t.status === 'done' ? '#45c4a0'
       : t.status === 'in_progress' ? '#f0a35e'
       : t.status === 'blocked' || t.status === 'failed' ? '#f07178'
-      : t.status === 'planning' ? '#8b7cf6' : '#63656e';
+      : t.status === 'planning' ? '#8b7cf6' : '#8a8d9b';
     const pct = Math.round((t.progress || 0) * 100);
     const rt = state.runtimeByTask.get(keyOf(t));
     const active = rt && rt.agent && rt.agent.state && rt.agent.state !== 'none' && rt.agent.state !== 'idle';
@@ -2641,7 +2684,7 @@ function renderRelations(focused) {
         html += `<div class="rel-board-group${isDoneGroup ? ' done-group' : ''}">
           <div class="rel-board-group-h rel-board-group-toggle" data-group="${esc(gKey)}" title="展开/收起">
             <span class="rel-board-caret">${collapsed ? '▸' : '▾'}</span>
-            <span class="rel-board-group-dot" style="background:${g.parent.archived ? '#63656e' : isDoneGroup ? '#45c4a0' : '#f0a35e'}"></span>
+            <span class="rel-board-group-dot" style="background:${g.parent.archived ? '#8a8d9b' : isDoneGroup ? '#45c4a0' : '#f0a35e'}"></span>
             <span class="rel-board-group-name" title="${esc(g.parent.title || g.parent.id)}">${esc((g.parent.title || g.parent.id).slice(0, 40))}</span>
             <span class="rel-board-group-count">${g.kids.length} 子任务${isDoneGroup ? '' : ` · ${pct}%`}</span>
           </div>
@@ -2673,7 +2716,7 @@ function renderRelations(focused) {
           { key: '3d', label: '三天内', max: 3 * DAY, color: '#8b7cf6' },
           { key: '7d', label: '七天内', max: 7 * DAY, color: '#4aa3ff' },
           { key: '30d', label: '一个月内', max: 30 * DAY, color: '#f0a35e' },
-          { key: 'older', label: '更早', max: Infinity, color: '#63656e' },
+          { key: 'older', label: '更早', max: Infinity, color: '#8a8d9b' },
         ];
         const inBucket = (t, b) => {
           const age = Math.max(0, now - taskLastTs(t));
@@ -2808,6 +2851,7 @@ function focusTask(t) {
   clearRuntimeUnread();
   state.treeOpen = false;
   state.subOpen = null;
+  state.docSel = null;
   /* 从关联画布点任务：恢复进入前的高度，不要再跑内容 fit 把窗口收短。 */
   if (state.relOpen || document.body.classList.contains('rel-canvas')) {
     leaveRelationsCanvas();
@@ -3398,7 +3442,7 @@ function renderAdmin() {
   for (const r of state.roots) {
     const row = document.createElement('div');
     row.className = 'adm-row';
-    row.innerHTML = `<div class="adm-info"><div class="adm-path" style="font-size:9.5px;color:var(--mist)">${esc(r)}</div></div>`;
+    row.innerHTML = `<div class="adm-info"><div class="adm-path" style="font-size:var(--text-sub);color:var(--mist)">${esc(r)}</div></div>`;
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'mini danger-mini';
@@ -3959,12 +4003,23 @@ function syncMenuChrome() {
     const mark = top.querySelector('i');
     if (mark) mark.textContent = state.alwaysOnTop ? '开' : '关';
   }
+  const quickTop = $('btnQuickTop');
+  if (quickTop) {
+    quickTop.classList.toggle('on', !!state.alwaysOnTop);
+    quickTop.setAttribute('aria-pressed', String(!!state.alwaysOnTop));
+    quickTop.title = state.alwaysOnTop ? '取消置顶' : '始终置顶 (Pin)';
+  }
   const adm = $('btnAdmin');
   if (adm) adm.setAttribute('aria-expanded', String(!!state.adminOpen));
   const treeBtn = $('btnTree');
   if (treeBtn) {
     treeBtn.classList.toggle('on', !!state.treeOpen);
     treeBtn.setAttribute('aria-expanded', String(!!state.treeOpen));
+  }
+  const relBtn = $('btnRelations');
+  if (relBtn) {
+    relBtn.classList.toggle('on', !!state.relOpen);
+    relBtn.setAttribute('aria-expanded', String(!!state.relOpen));
   }
   syncThemeChrome();
 }
@@ -4025,6 +4080,10 @@ function bindUI() {
   $('btnCapsule').onclick = () => { toggleMenu(false); setMode('capsule'); };
   $('btnAutoFollow').onclick = () => { toggleAutoFollow(); syncMenuChrome(); };
   $('btnTop').onclick = () => { toggleTop().then(() => syncMenuChrome()); };
+  const quickTop = $('btnQuickTop');
+  if (quickTop) quickTop.onclick = () => { toggleTop().then(() => syncMenuChrome()); };
+  const quickCapsule = $('btnQuickCapsule');
+  if (quickCapsule) quickCapsule.onclick = () => { toggleMenu(false); setMode('capsule'); };
   $('btnAdmin').onclick = () => { toggleMenu(false); toggleAdmin(); };
   if ($('btnAdminClose')) $('btnAdminClose').onclick = () => closeAdmin();
   if ($('btnTreeClose')) $('btnTreeClose').onclick = () => closeTree();
@@ -4046,7 +4105,8 @@ function bindUI() {
     };
   }
   $('btnHide').onclick = () => { toggleMenu(false); hideWindow(); };
-  $('btnFlip').onclick = () => { toggleMenu(false); closeProjectPop(); toggleFlip(); };
+  const btnFlip = $('btnFlip');
+  if (btnFlip) btnFlip.onclick = () => { toggleMenu(false); closeProjectPop(); toggleFlip(); };
   $('btnMenu').onclick = (e) => { e.stopPropagation(); toggleMenu(); };
   $('btnTheme').onclick = (e) => {
     e.preventDefault();
@@ -4181,7 +4241,7 @@ function bindUI() {
   /* 点击卡片空白区翻面；避让顶栏/菜单/sheet */
   $('flip').addEventListener('click', (e) => {
     if (state.mode !== 'card' || state.treeOpen || state.adminOpen || state.menuOpen) return;
-    if (e.target.closest('.subs, button, a, details, .doc, .runtime-evidence, .arts-mini, .dtabs, .sheet, .dragbar, input, .card-topbar, .menu-pop, .project-pop, .excerpt')) return;
+    if (e.target.closest('.subs, button, a, details, .doc, .runtime-evidence, .arts-mini, .dtabs, .sheet, .dragbar, input, .card-topbar, .card-unified-header, .menu-pop, .project-pop, .excerpt')) return;
     toggleFlip();
   });
 
@@ -4233,6 +4293,7 @@ function bindUI() {
     if (k === 'l' || k === 'L') toggleTree();
     if (k === 'c' || k === 'C') setMode(state.mode === 'capsule' ? 'card' : 'capsule');
     if (k === 'r' || k === 'R') manualRefresh();
+    if (k === 'f' || k === 'F') toggleFlip();
     if (state.treeOpen && k >= '1' && k <= '9') {
       const t = indexedTasks[Number(k) - 1];
       if (t) focusTask(t);
