@@ -117,6 +117,7 @@ body[data-theme="swiss"]{
   --ink:#f5f5f2;--ink2:#fff;--chalk:#101010;--mist:#4e4e4e;--dim:#858585;
   --line:rgba(16,16,16,.12);--line2:rgba(16,16,16,.26);
   --amber:#e2463c;--violet:#285aa8;--mint:#16856d;--rose:#b92832;--wrap:#df7b2d;
+  --state-spec:#0958d9;--state-spec-text-on:#ffffff;--state-live:var(--mint);--state-live-text:#0d6854;
   --font:Arial,"Helvetica Neue","PingFang SC",sans-serif;--serif:Arial,"Helvetica Neue","PingFang SC",sans-serif;
   --theme-card-bg:#f7f7f4;--theme-card-border:#111;--theme-panel-bg:#eeeeea;
   --theme-control-bg:#fff;--theme-pop-bg:#fafaf7;--theme-rail-bg:#ededE8;--theme-preview-bg:#f0f0eb;
@@ -368,6 +369,7 @@ body[data-theme="wabi-sabi"]{
   --ink:#e8e1d4;--ink2:#f1eadc;--chalk:#302e29;--mist:#68645a;--dim:#928c7e;
   --line:rgba(48,46,41,.12);--line2:rgba(48,46,41,.23);
   --amber:#b6874c;--violet:#6d747d;--mint:#6b8061;--rose:#a85f57;--wrap:#9d7354;
+  --state-spec:#2e649e;--state-spec-text-on:#ffffff;--state-live:var(--mint);--state-live-text:#395436;
   --font:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;--serif:Georgia,"Songti SC","STSong",serif;
   --theme-card-bg:#ebe4d7;--theme-card-border:#898273;--theme-panel-bg:rgba(255,255,255,.28);
   --theme-control-bg:rgba(242,235,222,.74);--theme-pop-bg:#eee7da;--theme-rail-bg:#e0d8ca;--theme-preview-bg:#eee6d8;

@@ -1540,8 +1540,15 @@ function renderCard(t, projectActivity) {
         ${artsMini(t)}
         <div class="stage">${stageHtml(t, rt)}</div>
         <div class="foot">
-          <span class="fid">${esc(t.id)}</span>
-          <span id="runtime-updated" class="when">更新于 ${esc(relTime(updatedAt)) || '—'}</span>
+          <div class="foot-meta">
+            <span class="fid">${esc(t.id)}</span>
+            <span id="runtime-updated" class="when">更新于 ${esc(relTime(updatedAt)) || '—'}</span>
+          </div>
+          <button type="button" class="card-flip-pill" id="btnPillFlip" title="翻转至背面查看详情与文档 (快捷键 F)" aria-label="翻转至背面查看详情与文档">
+            <span class="flip-pill-text">文档 &amp; 证据</span>
+            <svg class="lucide flip-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="icons.svg#i-refresh"/></svg>
+            <kbd class="flip-kbd">F</kbd>
+          </button>
         </div>
       </div>`;
 
@@ -1568,6 +1575,14 @@ function renderCard(t, projectActivity) {
       };
       lockBtn.setAttribute('aria-pressed', String(state.focusMode === 'manual'));
       lockBtn.innerHTML = focusLockHtml(state.focusMode === 'manual');
+    }
+    /* 正面翻面药丸：直观入口 */
+    const pillFlip = main.querySelector('#btnPillFlip');
+    if (pillFlip) {
+      pillFlip.onclick = (e) => {
+        e.stopPropagation();
+        toggleFlip();
+      };
     }
     /* 查看活动：切换到最新未读候选的正面活动卡；多个未读任务逐个查看。 */
     const unreadBtn = main.querySelector('[data-clear-unread]');
@@ -1714,6 +1729,8 @@ function scheduleWindowFit() {
       /* 空闲页不随占位文案压缩：保持标准卡片窗口高度，菜单等绝对定位浮层
          才有稳定的可用空间。 */
       if (card.dataset.kind === 'idle') h = Math.max(h, IDLE_WINDOW_HEIGHT);
+      /* 视口阻尼：正面主卡片设定基准高度上限 (540px)，超出部分依赖内部自滚动 */
+      h = Math.min(h, 540);
     }
     /* 原生窗口高度有同一套屏幕上限；舞台也同步使用该上限，避免原生层被
        截短时前端仍保留一个更高的内容层。 */
@@ -2029,8 +2046,17 @@ function renderBack(t, docs, loading, error) {
         <div class="runtime-back-activity">${esc(rt.activity || '暂无活动摘要')}</div>
         <ul id="runtime-timeline" class="runtime-timeline">${runtimeTrail}</ul>
       </div>` : '';
+  const backFlipBar = `
+    <div class="back-topbar">
+      <button type="button" class="card-flip-pill back-flip-pill" id="btnBackFlip" title="返回任务卡片 (快捷键 F 或 Esc)" aria-label="返回任务正面">
+        <svg class="lucide flip-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="icons.svg#i-arrow-left"/></svg>
+        <span class="flip-pill-text">返回卡片</span>
+        <kbd class="flip-kbd">Esc</kbd>
+      </button>
+    </div>`;
   back.innerHTML = `
     <div class="b-pane">
+      ${backFlipBar}
       ${inspectHeader}
       ${detailStatus}
       ${artsMini(t)}
@@ -2039,6 +2065,14 @@ function renderBack(t, docs, loading, error) {
       ${runtimeEvidence}
       ${docsHtml}
     </div>`;
+  /* 背面返回药丸：一键返回任务正面 */
+  const backFlipBtn = back.querySelector('#btnBackFlip');
+  if (backFlipBtn) {
+    backFlipBtn.onclick = (e) => {
+      e.stopPropagation();
+      toggleFlip(false);
+    };
+  }
   /* 约束规范芯片点击：就地在下方文档区预览规范内容，再次点击切回默认文档 */
   back.querySelectorAll('.governing-spec-chip').forEach(btn => {
     btn.onclick = () => {
@@ -2885,7 +2919,8 @@ function toggleAutoFollow() {
 /* ---------- 胶囊：灵动岛紧凑态 + 展开态 ---------- */
 let lastCapRuntimeState = null;
 let lastCapsuleWindowExpanded = null;
-let capCapCollapseT = null;   /* pointerout 收起防抖定时器 */
+let capExpandTimer = null;    /* pointerenter 展开意图防抖定时器 (220ms) */
+let capCollapseTimer = null;  /* pointerleave 收起缓冲定时器 (200ms) */
 let capsuleWindowResizeChain = Promise.resolve();
 let modeTransitioning = false;
 function syncCapsuleWindow() {
@@ -2922,7 +2957,8 @@ function renderCapsule(t, projectActivity) {
   if (!show) {
     cap.classList.remove('is-expanded', 'menu-open');
     lastCapsuleWindowExpanded = null;
-    if (capCapCollapseT) { clearTimeout(capCapCollapseT); capCapCollapseT = null; }
+    if (capExpandTimer) { clearTimeout(capExpandTimer); capExpandTimer = null; }
+    if (capCollapseTimer) { clearTimeout(capCollapseTimer); capCollapseTimer = null; }
     const pop = $('capMenuPop');
     if (pop) pop.hidden = true;
     const btn = $('btnCapMenu');
@@ -3147,7 +3183,10 @@ async function toggleCapMenu(force) {
      菜单 pop 要等窗口真正到 136px 后再显示，避免被 40px 紧凑窗口裁切。 */
   if (cap) {
     cap.classList.toggle('menu-open', target);
-    if (target && capCapCollapseT) { clearTimeout(capCapCollapseT); capCapCollapseT = null; }
+    if (target) {
+      if (capExpandTimer) { clearTimeout(capExpandTimer); capExpandTimer = null; }
+      if (capCollapseTimer) { clearTimeout(capCollapseTimer); capCollapseTimer = null; }
+    }
   }
   syncCapsuleWindow();
   btn.classList.toggle('on', target);
@@ -4126,29 +4165,50 @@ function bindUI() {
   if (capBody) {
     const cap = $('capsule');
     if (cap) {
-      const expand = () => {
-        if (capCapCollapseT) { clearTimeout(capCapCollapseT); capCapCollapseT = null; }
-        cap.classList.add('is-expanded');
-        syncCapsuleWindow();
+      const handlePointerEnter = () => {
+        if (capCollapseTimer) { clearTimeout(capCollapseTimer); capCollapseTimer = null; }
+        if (cap.classList.contains('is-expanded')) return;
+        /* 220ms 意图延时防抖：鼠标快速划过（>400px/s 掠过耗时 <100ms）不触发展开与窗口 resize */
+        if (capExpandTimer) clearTimeout(capExpandTimer);
+        capExpandTimer = setTimeout(() => {
+          capExpandTimer = null;
+          cap.classList.add('is-expanded');
+          syncCapsuleWindow();
+        }, 220);
       };
-      const collapseIfOutside = (e) => {
+
+      const handlePointerLeave = (e) => {
+        /* 离开时立即取消尚未触发的展开意图计时器（掠过防抖核心） */
+        if (capExpandTimer) { clearTimeout(capExpandTimer); capExpandTimer = null; }
         if (cap.classList.contains('menu-open')) return;   /* 菜单打开期间锁定展开态 */
         if (e.relatedTarget && cap.contains(e.relatedTarget)) return;
-        /* 120ms 防抖：指针短暂扫过边缘不触发收起抖动（窗口 resize 抖动） */
-        if (capCapCollapseT) clearTimeout(capCapCollapseT);
-        capCapCollapseT = setTimeout(() => {
-          capCapCollapseT = null;
+
+        /* 200ms 防抖缓冲区：指针短暂离开边缘不触发抖动 */
+        if (capCollapseTimer) clearTimeout(capCollapseTimer);
+        capCollapseTimer = setTimeout(() => {
+          capCollapseTimer = null;
           cap.classList.remove('is-expanded');
           syncCapsuleWindow();
-        }, 120);
+        }, 200);
       };
-      cap.addEventListener('pointerover', expand);
-      cap.addEventListener('pointerout', collapseIfOutside);
-      cap.addEventListener('focusin', expand);
+
+      const expandImmediate = () => {
+        if (capCollapseTimer) { clearTimeout(capCollapseTimer); capCollapseTimer = null; }
+        if (capExpandTimer) { clearTimeout(capExpandTimer); capExpandTimer = null; }
+        if (!cap.classList.contains('is-expanded')) {
+          cap.classList.add('is-expanded');
+          syncCapsuleWindow();
+        }
+      };
+
+      cap.addEventListener('pointerenter', handlePointerEnter);
+      cap.addEventListener('pointerleave', handlePointerLeave);
+      cap.addEventListener('focusin', expandImmediate);
       cap.addEventListener('focusout', (e) => {
         if (cap.classList.contains('menu-open')) return;   /* 菜单打开期间锁定展开态 */
         requestAnimationFrame(() => {
           if (!cap.contains(document.activeElement) && !(e.relatedTarget && cap.contains(e.relatedTarget))) {
+            if (capExpandTimer) { clearTimeout(capExpandTimer); capExpandTimer = null; }
             cap.classList.remove('is-expanded');
             syncCapsuleWindow();
           }
