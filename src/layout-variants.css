@@ -5,6 +5,7 @@
 /* ---------- editorial / specimen card ----------
    More breathing room around the title and PRD, with supporting telemetry
    compressed into quiet rails. This is the closest refinement to original. */
+body[data-layout="editorial"] .card{--grid-post-w:40px}
 body[data-layout="editorial"] .grid{grid-template-columns:40px 1fr}
 body[data-layout="editorial"] .post{padding:18px 0 14px}
 body[data-layout="editorial"] .main{padding:12px 18px 0 16px}
@@ -40,6 +41,7 @@ body[data-layout="editorial"] .doc{font-size:12px;line-height:1.7}
 /* ---------- signal / observation desk ----------
    The live signal gets a fixed, early reading slot. Metadata follows it in
    deterministic rows, so the card scans top-to-bottom like an instrument. */
+body[data-layout="signal"] .card{--grid-post-w:0px}
 body[data-layout="signal"] .pane{
   display:grid;grid-template-rows:auto auto auto auto auto auto auto minmax(0,1fr) auto;
   grid-template-areas:"head" "title" "timeline" "hero" "phase" "meta" "arts" "stage" "foot";
@@ -80,6 +82,7 @@ body[data-layout="signal"] .runtime-evidence{padding:9px 10px}
    The left spine becomes the primary organizing axis. The content column is
    narrower and quieter, while each major block reads as a station on the
    same vertical journey. */
+body[data-layout="timeline"] .card{--grid-post-w:58px}
 body[data-layout="timeline"] .grid{grid-template-columns:58px 1fr}
 body[data-layout="timeline"] .post{padding:18px 0 14px}
 body[data-layout="timeline"] .post::before{top:24px;bottom:24px}
@@ -106,6 +109,7 @@ body[data-layout="timeline"] .runtime-evidence{border-left:2px solid var(--accen
    Reduce instrumentation noise and spend the recovered space on legible
    title and PRD copy. Nothing is removed from the data contract; secondary
    rails become visually quieter rather than disappearing. */
+body[data-layout="focus"] .card{--grid-post-w:34px}
 body[data-layout="focus"] .grid{grid-template-columns:34px 1fr}
 body[data-layout="focus"] .post{padding:18px 0 14px}
 body[data-layout="focus"] .rung .lab{font-size:var(--text-badge);letter-spacing:0}
@@ -239,6 +243,7 @@ body[data-layout="focus"] .meta{margin-top:5px;padding-bottom:2px}
    A front-only convergence pass. The original rail and specimen language
    stay intact, while duplicate telemetry is removed from the reading path.
    Details and capsule keep their own information contract. */
+body[data-layout="front-refined"] .card{--grid-post-w:46px}
 body[data-layout="front-refined"] .face.front .grid{grid-template-columns:46px 1fr}
 body[data-layout="front-refined"] .face.front .main{padding:12px 15px 0 14px}
 body[data-layout="front-refined"] .face.front .pane{
@@ -258,22 +263,16 @@ body[data-layout="front-refined"] .face.front .pane>.observe-timeline,
 body[data-layout="front-refined"] .face.front .pane>.arts-mini{display:none}
 
 /* The top controls remain discoverable, but no longer compete with the title. */
-body[data-layout="front-refined"] .card:not(.flipped) .card-unified-header,
-body[data-layout="front-refined"] .card:not(.flipped) .card-topbar{padding:0 8px}
+body[data-layout="front-refined"] .card:not(.flipped) .card-unified-header{padding:0 8px}
 body[data-layout="front-refined"] .card:not(.flipped) .card-unified-header .proj-chip,
 body[data-layout="front-refined"] .card:not(.flipped) .card-unified-header .proj-select-chip,
-body[data-layout="front-refined"] .card:not(.flipped) .card-topbar .proj-chip,
-body[data-layout="front-refined"] .card:not(.flipped) .card-unified-header .iconbtn,
-body[data-layout="front-refined"] .card:not(.flipped) .card-topbar .iconbtn{
+body[data-layout="front-refined"] .card:not(.flipped) .card-unified-header .iconbtn{
   background:rgba(15,17,25,.54);border-color:rgba(236,234,226,.09);color:var(--dim)
 }
 body[data-layout="front-refined"] .card:not(.flipped) .card-unified-header .proj-chip:hover,
 body[data-layout="front-refined"] .card:not(.flipped) .card-unified-header .proj-select-chip:hover,
-body[data-layout="front-refined"] .card:not(.flipped) .card-topbar .proj-chip:hover,
 body[data-layout="front-refined"] .card:not(.flipped) .card-unified-header .iconbtn:hover,
-body[data-layout="front-refined"] .card:not(.flipped) .card-topbar .iconbtn:hover,
-body[data-layout="front-refined"] .card:not(.flipped) .card-unified-header .iconbtn.on,
-body[data-layout="front-refined"] .card:not(.flipped) .card-topbar .iconbtn.on{
+body[data-layout="front-refined"] .card:not(.flipped) .card-unified-header .iconbtn.on{
   color:var(--chalk);border-color:color-mix(in srgb,var(--accent) 38%,var(--line2))
 }
 
@@ -395,9 +394,7 @@ body[data-layout="front-refined"] .face.front .live{
 }
 body[data-layout="front-refined"] .face.front .live i{background:var(--mint)}
 
-/* The shared topbar overlays both faces; the detail face reserves its own
-   header band so the document title never sits underneath controls. */
-body[data-layout] .card.flipped .face.back{padding-top:36px}
+/* 顶栏已在 .flip 之外独立成行，背面不再需要额外顶部留白。 */
 body[data-layout="front-refined"] .face.front .foot{padding-top:8px}
 
 @media (max-height:560px){
@@ -407,6 +404,7 @@ body[data-layout="front-refined"] .face.front .foot{padding-top:8px}
 }
 
 @media (max-width:360px){
+  body[data-layout="front-refined"] .card{--grid-post-w:42px}
   body[data-layout="front-refined"] .face.front .grid{grid-template-columns:42px 1fr}
   body[data-layout="front-refined"] .face.front .main{padding-right:12px;padding-left:12px}
   body[data-layout="front-refined"] .face.front .title{font-size:20px}

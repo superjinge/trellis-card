@@ -861,7 +861,11 @@ fn scan_task_dir(
     {
         Some(r) => r,
         None => {
-            errors.push(format!("跳过任务 {}", dir_name));
+            if !task_json_path.exists() {
+                errors.push(format!("跳过任务 {}: 缺少 task.json", dir_name));
+            } else {
+                errors.push(format!("跳过任务 {}: task.json 格式损坏", dir_name));
+            }
             return;
         }
     };
@@ -1500,5 +1504,15 @@ paths: [src/index.ts, 'test/*.test.js', "docs/**"]
             resolve_task_workflow(Some("../escape"), Some("dev-valid"), None),
             Some("dev-valid".to_string())
         );
+    }
+
+    #[test]
+    fn scan_reports_accurate_error_when_task_json_missing_or_corrupted() {
+        let f = setup("error-reporting");
+        let (tasks, errors) = scan_tasks(&f.alpha);
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(errors.len(), 2);
+        assert!(errors.contains(&"跳过任务 02-broken: task.json 格式损坏".to_string()));
+        assert!(errors.contains(&"跳过任务 03-nojson: 缺少 task.json".to_string()));
     }
 }
