@@ -488,6 +488,38 @@ fn mtime_ms(p: &Path) -> i64 {
         .unwrap_or(0)
 }
 
+fn task_docs_max_mtime(task_path: &Path) -> i64 {
+    let mut max_m = 0i64;
+    if let Ok(entries) = fs::read_dir(task_path) {
+        for e in entries.flatten() {
+            if let Ok(ft) = e.file_type() {
+                if ft.is_file() {
+                    let name = e.file_name();
+                    let name_str = name.to_string_lossy();
+                    if name_str.ends_with(".md") {
+                        max_m = max_m.max(mtime_ms(&e.path()));
+                    }
+                }
+            }
+        }
+    }
+    let research_dir = task_path.join("research");
+    if let Ok(entries) = fs::read_dir(research_dir) {
+        for e in entries.flatten() {
+            if let Ok(ft) = e.file_type() {
+                if ft.is_file() {
+                    let name = e.file_name();
+                    let name_str = name.to_string_lossy();
+                    if name_str.ends_with(".md") {
+                        max_m = max_m.max(mtime_ms(&e.path()));
+                    }
+                }
+            }
+        }
+    }
+    max_m
+}
+
 struct TaskLocation<'a> {
     rel_dir: &'a str,
     archived: bool,
@@ -907,7 +939,7 @@ fn scan_task_dir(
     tasks.push(build_task(
         dir_name,
         raw,
-        mtime_ms(&task_json_path),
+        mtime_ms(&task_json_path).max(task_docs_max_mtime(task_path)),
         task_sessions,
         excerpt,
         artifacts,
@@ -1065,6 +1097,21 @@ mod tests {
         assert!(t.mtime > 0);
         assert_eq!(t.progress, 0.5);
         assert_eq!(t.kind, "work");
+    }
+
+    #[test]
+    fn scan_task_mtime_includes_docs_mtime() {
+        let f = setup("docs-mtime");
+        let t1_dir = f.alpha.join(".trellis/tasks/01-a");
+        let (tasks, _) = scan_tasks(&f.alpha);
+        let mtime_before = tasks[0].mtime;
+
+        std::thread::sleep(std::time::Duration::from_millis(15));
+        fs::write(t1_dir.join("prd.md"), "# Updated PRD").unwrap();
+
+        let (tasks_after, _) = scan_tasks(&f.alpha);
+        let mtime_after = tasks_after[0].mtime;
+        assert!(mtime_after > mtime_before, "文档修改后任务 mtime 必须增加");
     }
 
     #[test]

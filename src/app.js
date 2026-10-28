@@ -1093,8 +1093,15 @@ function updateStatus() {
   }
 }
 async function manualRefresh() {
+  state.prdCache = null;
+  mdCache.clear();
   await refresh(true);
-  render();
+  const cur = state.evidenceTarget || currentFocus();
+  if (state.flipped && cur) {
+    await loadBack(cur, { force: true });
+  } else {
+    render();
+  }
   toast('已刷新');
 }
 
@@ -1929,16 +1936,59 @@ async function toggleFlip(force) {
      避免动画未完成时测量到不稳定的高度（详情页/概要页切换拉伸「时有时无」的根因）。 */
   setTimeout(scheduleWindowFit, 750);
 }
+function docsEqual(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const da = a[i], db = b[i];
+    if (da.name !== db.name || da.label !== db.label || da.content !== db.content) {
+      return false;
+    }
+  }
+  return true;
+}
+
+let isRevalidating = false;
+async function revalidateBack(t) {
+  if (!t || !state.flipped || isRevalidating) return false;
+  const key = keyOf(t);
+  isRevalidating = true;
+  try {
+    const full = await call('get_task', { project: t.projectPath || t.project, id: t.id });
+    const newDocs = (full && full.docs) || [];
+    const curTarget = state.evidenceTarget || currentFocus();
+    if (!state.flipped || !curTarget || keyOf(curTarget) !== key) {
+      return false;
+    }
+    const cached = state.prdCache && state.prdCache.key === key ? state.prdCache : null;
+    if (cached && !cached.error && docsEqual(cached.docs, newDocs)) {
+      return false;
+    }
+    state.prdCache = { key, docs: newDocs };
+    renderBack(t, newDocs, false, null, false, { preserveScroll: true });
+    return true;
+  } catch (e) {
+    console.error('[invoke:revalidateBack]', e);
+    return false;
+  } finally {
+    isRevalidating = false;
+  }
+}
+
 /* 背面数据：artifacts 用 list_tasks 自带的，文档（prd/design/implement/调研/报告等）走 get_task（聚焦期内缓存）。
-   activeTarget：本次展示的任务；异步返回时用它判断是否回填，避免 evidence 候选（非 currentFocus）停在加载中。 */
-async function loadBack(t) {
+   activeTarget：本次展示的任务；异步返回时用它判断是否回填，避免 evidence 候选（非 currentFocus）停在加载中。
+   支持 Stale-While-Revalidate：命中缓存先秒开，后台异步拉取重校验；支持 force 强制重读。 */
+async function loadBack(t, { force = false, silent = false } = {}) {
   const key = keyOf(t);
   state.backActiveKey = key;
-  if (state.prdCache && state.prdCache.key === key) {
-    renderBack(t, state.prdCache.docs, false, state.prdCache.error);
+  if (!force && state.prdCache && state.prdCache.key === key && !state.prdCache.error) {
+    renderBack(t, state.prdCache.docs, false, null);
+    /* SWR：命中缓存先秒开（保持翻面动画丝滑），后台异步重校验最新文档 */
+    revalidateBack(t);
     return;
   }
-  renderBack(t, null, true);   /* 加载中 */
+  if (!silent) renderBack(t, null, true);   /* 加载中 */
   try {
     const full = await call('get_task', { project: t.projectPath || t.project, id: t.id });
     state.prdCache = { key, docs: (full && full.docs) || [] };
@@ -1961,8 +2011,11 @@ async function loadBack(t) {
      延迟让 renderBack 布局稳定后再测量（翻面动画 + 内容渲染）。 */
   scheduleWindowFit();
 }
-function renderBack(t, docs, loading, error, isTabSwitch = false) {
+function renderBack(t, docs, loading, error, isTabSwitch = false, options = {}) {
   const back = $('back');
+  /* 记录当前激活文档面板的滚动条位置（SWR 或重绘时保持浏览进度） */
+  const curActiveDoc = back.querySelector('.doc-panel:not([hidden]), .doc-spec:not([hidden])');
+  const savedScrollTop = (options && options.preserveScroll && curActiveDoc) ? curActiveDoc.scrollTop : null;
   const rt = runtimeViewForTask(t);
   const phaseTrail = [t.phase && t.phase.id, rt.action, rt.displayState].filter(Boolean).map((item) => esc(DISPLAY_COPY[item] || ACTION_COPY[item] || item)).join(' → ');
   const runtimeTrail = rt.agent
@@ -2157,6 +2210,11 @@ function renderBack(t, docs, loading, error, isTabSwitch = false) {
         <span class="flip-pill-text">返回卡片</span>
         <kbd class="flip-kbd">Esc</kbd>
       </button>
+      <button type="button" class="card-flip-pill back-refresh-pill" id="btnBackRefresh" title="从磁盘重新读取文档 (快捷键 R)" aria-label="重新读取文档">
+        <svg class="lucide flip-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="icons.svg#i-refresh"/></svg>
+        <span class="flip-pill-text">重载文档</span>
+        <kbd class="flip-kbd">R</kbd>
+      </button>
     </div>`;
   back.innerHTML = `
     <div class="b-pane">
@@ -2175,6 +2233,14 @@ function renderBack(t, docs, loading, error, isTabSwitch = false) {
     backFlipBtn.onclick = (e) => {
       e.stopPropagation();
       toggleFlip(false);
+    };
+  }
+  /* 背面重载药丸：从磁盘重新读取最新文档 */
+  const backRefreshBtn = back.querySelector('#btnBackRefresh');
+  if (backRefreshBtn) {
+    backRefreshBtn.onclick = (e) => {
+      e.stopPropagation();
+      manualRefresh();
     };
   }
   /* 导航历史返回按钮：退回跳转前的来源任务与文档 */
@@ -2228,8 +2294,12 @@ function renderBack(t, docs, loading, error, isTabSwitch = false) {
     retry.onclick = () => {
       state.prdCache = null;
       mdCache.clear();
-      loadBack(t);
+      loadBack(t, { force: true });
     };
+  }
+  if (savedScrollTop !== null) {
+    const nextActiveDoc = back.querySelector('.doc-panel:not([hidden]), .doc-spec:not([hidden])');
+    if (nextActiveDoc) nextActiveDoc.scrollTop = savedScrollTop;
   }
   scheduleWindowFit();   /* 文档高度变化（含异步加载完成、切标签）后重对齐窗口 */
 }
@@ -4199,6 +4269,11 @@ async function onTasksChanged({ urgent = false, project = null } = {}) {
   }
   /* 仅当 reveal/new-task 或归档刷新实际改动了状态时补充 render；否则 refresh 内部已渲染。 */
   if ((focusMutated || state.showArchived) && state.view === 'main') render();
+  /* 卡片处于背面时，文档变更后自动后台静默重校验并热重载 */
+  if (state.flipped && state.view === 'main') {
+    const cur = state.evidenceTarget || currentFocus();
+    if (cur) revalidateBack(cur);
+  }
 }
 function bindWatch() {
   if (!hasTauri || !window.__TAURI__.event) return;
@@ -4678,6 +4753,12 @@ function bindUI() {
         goBackNavHistory();
         return;
       }
+    }
+    /* 快捷键：Cmd+R / Ctrl+R 手动刷新（覆盖原生 webview 刷新并执行全面重载） */
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'r' || e.key === 'R')) {
+      e.preventDefault();
+      manualRefresh();
+      return;
     }
     /* 组合键（如 Cmd+F）交给系统/浏览器，不当作单键快捷键 */
     if (e.metaKey || e.ctrlKey || e.altKey) return;

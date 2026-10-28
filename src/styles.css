@@ -774,6 +774,7 @@ body.fit.admin-open .card,body.fit.admin-open .card[data-kind="idle"]{flex:1;min
 }
 .card-flip-pill:hover .flip-icon{transform:rotate(90deg)}
 .card-flip-pill.back-flip-pill:hover .flip-icon{transform:translateX(-2px)}
+.card-flip-pill.back-refresh-pill:hover .flip-icon{transform:rotate(180deg)}
 .card-flip-pill .flip-kbd{
   display:inline-flex;align-items:center;justify-content:center;
   padding:0 4px;height:14px;border-radius:3px;
@@ -788,7 +789,7 @@ body.fit.admin-open .card,body.fit.admin-open .card[data-kind="idle"]{flex:1;min
 
 /* 背面顶栏容器 */
 .back-topbar{
-  display:flex;align-items:center;justify-content:flex-start;
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
   padding:1px 0 6px 0;margin-bottom:2px;border-bottom:1px solid var(--line);
 }
 
