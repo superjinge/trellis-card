@@ -30,12 +30,15 @@
   /* 灵动岛展开/收起曲线：Q 弹过冲，避免生硬；收起时轻微过冲形成"吸回"感 */
   --island-in:cubic-bezier(.16,1.3,.3,1);
 
-  /* ---------- shadcn 语义层：组件只消费这里，主题继续覆盖 primitive ---------- */
+  /* ---------- shadcn 语义层：组件只消费这里，主题继续覆盖 primitive ----------
+     注意：派生别名的权威定义在下方 body{} 块，这里只是首屏兜底。
+     原因见 body{} 处注释（var() 在声明元素上求值，:root 别名不跟随 body 的 primitive 覆盖）。 */
   --background:var(--ink);
+  /* --background 预留：Tauri 窗口透明，body 不绘制底色 */
   --foreground:var(--chalk);
   --card-bg:var(--ink2);
   --card-foreground:var(--chalk);
-  --popover-bg:#15130f;
+  --popover-bg:color-mix(in srgb,var(--ink2) 96%,var(--chalk) 4%);
   --popover-foreground:var(--chalk);
   --primary:var(--amber);
   --primary-foreground:#1d1206;
@@ -77,11 +80,37 @@
   --control-h-lg:28px;
   --tracking-label:.12em;
 }
+/* 语义别名的求值作用域必须落在 body：
+   var() 在**声明该自定义属性的元素**上求值，而主题（theme-variants.css）
+   只在 body[data-theme="…"] 上覆盖 primitive（--chalk/--amber/--rose…）。
+   若派生别名只写在 :root（html），它们会在 html 上固化成默认主题色并原样继承，
+   浅色主题就会拿到「近白正文 / 默认琥珀主色 / 深色浮层」，产生对比度回归（minimalism 实测 1.09:1）。
+   :root 保留同名兜底，两处必须保持同步修改。
+   --primary-foreground 是字面量、非派生，主题可自行覆盖，故不在此重复。 */
+body{
+  --background:var(--ink);
+  --foreground:var(--chalk);
+  --card-bg:var(--ink2);
+  --card-foreground:var(--chalk);
+  --popover-bg:color-mix(in srgb,var(--ink2) 96%,var(--chalk) 4%);
+  --popover-foreground:var(--chalk);
+  --primary:var(--amber);
+  --primary-soft:color-mix(in srgb,var(--amber) 12%,transparent);
+  --secondary:color-mix(in srgb,var(--chalk) 7%,transparent);
+  --secondary-foreground:var(--chalk);
+  --muted:color-mix(in srgb,var(--chalk) 4%,transparent);
+  --muted-foreground:var(--mist);
+  --destructive:var(--rose);
+  --border:var(--line);
+  --border-strong:var(--line2);
+  --input:var(--line2);
+  --ring:color-mix(in srgb,var(--amber) 70%,transparent);
+}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 html,body{height:100%}
 body{
-  margin:0;font-family:var(--font);color:var(--chalk);
+  margin:0;font-family:var(--font);color:var(--foreground);
   background:transparent;               /* Tauri 无边框透明窗口 */
   overflow:hidden;user-select:none;
   -webkit-font-smoothing:antialiased;
@@ -107,7 +136,7 @@ body{
 .sheet-filters{padding:4px 10px 8px}
 .star{
   border:1px solid var(--border);background:color-mix(in srgb, var(--chalk) 3%, transparent);color:var(--mist);
-  font-family:var(--mono);font-size:var(--text-sub);font-weight:600;padding:3px 9px;border-radius:var(--radius-sm);
+  font-family:var(--mono);font-size:var(--text-sub);font-weight:600;padding:0 9px;min-height:var(--control-h);border-radius:var(--radius-sm);
   cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:color var(--dur-fast),border-color var(--dur-fast),background var(--dur-fast);
 }
 .star:hover,.star.on{color:var(--chalk);border-color:color-mix(in srgb,var(--primary) 40%,var(--border-strong));background:color-mix(in srgb,var(--primary) 10%,transparent)}
@@ -176,6 +205,7 @@ body{
   display:flex;flex-direction:column;gap:2px;padding:6px;
   border-radius:var(--radius-xl);border:1px solid var(--border-strong);
   background:var(--theme-pop-bg,var(--popover-bg));
+  color:var(--popover-foreground);
   box-shadow:var(--shadow-md);
 }
 .project-pop .star{width:100%;justify-content:flex-start}
@@ -193,6 +223,7 @@ body{
   display:flex;flex-direction:column;gap:4px;padding:6px;
   border-radius:var(--radius-xl);border:1px solid var(--border-strong);
   background:var(--theme-pop-bg,var(--popover-bg));
+  color:var(--popover-foreground);
   box-shadow:var(--shadow-md);
   backdrop-filter:blur(16px) saturate(1.1);-webkit-backdrop-filter:blur(16px) saturate(1.1);
   animation:menuIn var(--dur-base) var(--ease);
@@ -214,11 +245,11 @@ body{
 .mp-label-wrap{display:inline-flex;align-items:center;gap:7px;min-width:0}
 .mp-label-wrap .lucide{flex:0 0 auto;color:var(--dim)}
 .mp-row:hover .mp-label-wrap .lucide{color:var(--primary)}
-.mp-row.danger .mp-label-wrap .lucide{color:#c98a90}
+.mp-row.danger .mp-label-wrap .lucide{color:color-mix(in srgb,var(--destructive) 70%,var(--mist))}
 .mp-row.setting i{font-style:normal;font-size:var(--text-badge);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:0 5px;color:var(--dim)}
 .mp-row.setting[aria-checked="true"] i{color:var(--chalk);border-color:color-mix(in srgb,var(--mint) 50%,var(--line2));background:color-mix(in srgb,var(--mint) 12%,transparent)}
-.mp-row.danger{color:#e8a0a6}
-.mp-row.danger:hover{color:#f5a8ad;border-color:color-mix(in srgb,var(--rose) 40%,var(--line))}
+.mp-row.danger{color:color-mix(in srgb,var(--destructive) 70%,var(--chalk))}
+.mp-row.danger:hover{color:color-mix(in srgb,var(--destructive) 70%,var(--chalk));background:color-mix(in srgb,var(--destructive) 10%,transparent);border-color:color-mix(in srgb,var(--destructive) 40%,var(--line))}
 /* 状态元信息：不进菜单，固定在卡片底角，不参与菜单高度。
    .card>* 在 :255 处把所有直接子元素重置为 position:relative（特异性更高），
    这里必须用 .card>.card-status 覆盖，否则会掉回文档流贴到拖动条下方。 */
@@ -233,6 +264,7 @@ body{
 
 
 /* ---------- 胶囊模式：固定 360×136 分区面板 ---------- */
+/* body[data-theme] 模式下胶囊皮肤由 theme-variants.css 的 .capsule::before 绘制，此处的圆角/阴影仅作无主题兜底 */
 .capsule{
   display:none;position:relative;flex-direction:column;
   width:360px;height:40px;box-sizing:border-box;
@@ -364,7 +396,7 @@ body{
 .cap-preview-project:empty{display:none}
 .cap-badge{
   flex-shrink:0;min-width:16px;height:16px;padding:0 5px;border-radius:var(--radius-sm);
-  background:color-mix(in srgb,var(--primary) 85%,#000);color:var(--primary-foreground);
+  background:var(--primary);color:var(--primary-foreground);
   font-family:var(--mono);font-size:var(--text-badge);font-weight:800;line-height:16px;text-align:center;
   cursor:pointer;border:0;
 }
@@ -418,6 +450,7 @@ body{
   gap:4px;padding:6px;box-sizing:border-box;
   border-radius:var(--radius-xl);border:1px solid var(--border-strong);
   background:linear-gradient(180deg,#191510f8,#0f0d0afa);
+  color:var(--popover-foreground);
   box-shadow:var(--shadow-md);
   backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
 }
@@ -429,13 +462,13 @@ body{
   overflow:hidden;white-space:nowrap;text-overflow:ellipsis;
   transition:color var(--dur-fast),background var(--dur-fast),border-color var(--dur-fast);
 }
-.cap-tool:hover{color:var(--chalk);background:color-mix(in srgb, var(--chalk) 7%, transparent);border-color:var(--border-strong)}
+.cap-tool:hover{color:var(--chalk);background:var(--secondary);border-color:var(--border-strong)}
 .cap-tool.setting{display:flex;align-items:center;justify-content:space-between;gap:6px}
 .cap-tool.setting > span{overflow:hidden;text-overflow:ellipsis}
 .cap-tool.setting i{font-style:normal;font-size:var(--text-badge);border:1px solid var(--line2);border-radius:6px;padding:0 5px;color:var(--dim);flex-shrink:0}
 .cap-tool.setting[aria-checked="true"] i{color:var(--chalk);border-color:color-mix(in srgb,var(--mint) 50%,var(--line2))}
 .cap-tool[aria-pressed="true"]{color:var(--chalk);border-color:color-mix(in srgb,var(--amber) 40%,var(--line2));background:color-mix(in srgb,var(--amber) 12%,transparent)}
-.cap-tool.danger:hover{color:#f5a8ad}
+.cap-tool.danger:hover{color:color-mix(in srgb,var(--destructive) 70%,var(--chalk))}
 
 body[data-mode="capsule"] .world{justify-content:center;align-items:center;padding:0;border-radius:0;width:min(360px,100vw);height:40px;overflow:visible}
 /* 展开态舞台高度跟随胶囊；JS 也会在 syncCapsuleWindow 内联覆盖（浏览器预览靠 :has 兜底） */
@@ -505,6 +538,7 @@ body.fit.admin-open .card,body.fit.admin-open .card[data-kind="idle"]{flex:1;min
   background:
     linear-gradient(155deg,rgba(255,255,255,.04),transparent 44%),
     linear-gradient(180deg,#17140f 0%,#110f0c 54%,#0b0a08 100%);
+  color:var(--card-foreground);
   filter:none;
   box-shadow:var(--shadow-card);
   animation:rise .45s var(--ease) both;
@@ -919,7 +953,7 @@ body.fit .sheet.settings #adminBody{overflow:auto;flex:1 1 auto;min-height:0}
   font-size:10px;line-height:1;transition:color .15s,background .15s;
 }
 .disclosure:hover{color:var(--chalk);background:color-mix(in srgb, var(--chalk) 8%, transparent)}
-.disclosure:focus-visible{outline:2px solid var(--ring);outline-offset:1px}
+.disclosure:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
 .disclosure .car{display:inline-flex;align-items:center;justify-content:center;transition:transform .18s}
 .disclosure-slot{width:16px;flex-shrink:0}
 .node .d{width:7px;height:7px;border-radius:50%}
@@ -955,7 +989,7 @@ body.fit .sheet.settings #adminBody{overflow:auto;flex:1 1 auto;min-height:0}
 .node .row:hover .tree-archive,
 .node .tree-archive:focus-visible{opacity:1}
 .node .tree-archive:hover{color:var(--chalk);background:color-mix(in srgb, var(--chalk) 8%, transparent);border-color:color-mix(in srgb, var(--chalk) 20%, transparent)}
-.node .tree-archive:focus-visible{outline:2px solid var(--ring);outline-offset:1px}
+.node .tree-archive:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
 .node .tree-archive.busy{opacity:.45;pointer-events:none}
 
 /* ---------- 任务关联视图 ---------- */
@@ -1433,13 +1467,13 @@ body.rel-canvas .rel-graph{
 .inspect-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
 .inspect-mode{font-family:var(--mono);font-size:var(--text-sub);font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
 .inspect-task{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:10px;font-size:10px;font-weight:650;color:var(--chalk)}
-.mini.danger-mini{color:#e8a0a6;border-color:color-mix(in srgb,var(--rose) 35%,var(--line2))}
+.mini.danger-mini{color:var(--destructive);border-color:color-mix(in srgb,var(--rose) 35%,var(--line2))}
 
 /* ---------- 管理面板 ---------- */
 #adminBody{overflow:auto;min-height:0;padding:2px 10px 12px}
 .adm-sec{font-family:var(--mono);font-size:var(--text-sub);letter-spacing:var(--tracking-label);text-transform:uppercase;color:var(--dim);padding:10px 4px 6px}
 .adm-note{padding:6px 4px;font-size:11px;color:var(--dim)}
-.adm-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:var(--radius-lg);background:color-mix(in srgb, var(--chalk) 3%, transparent);border:1px solid var(--border);margin-bottom:6px}
+.adm-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:var(--radius-lg);background:var(--muted);border:1px solid var(--border);margin-bottom:6px}
 .adm-info{min-width:0;flex:1}
 .adm-name{font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px;color:var(--chalk)}
 .adm-count{font-family:var(--mono);font-size:var(--text-sub);color:var(--dim);font-weight:600}
@@ -1459,7 +1493,7 @@ body.rel-canvas .rel-graph{
 .hook-state-checking svg,.hook-refresh svg{animation:spin 1s linear infinite}
 .hook-action{min-width:52px}
 .hook-error{padding:6px 4px;color:var(--rose)}
-.mini{flex-shrink:0;border:1px solid var(--border-strong);background:color-mix(in srgb, var(--chalk) 5%, transparent);color:var(--chalk);font-family:var(--font);font-size:11px;font-weight:700;padding:0 10px;min-height:var(--control-h-lg);border-radius:var(--radius-md);cursor:pointer;transition:color var(--dur-fast),background var(--dur-fast),border-color var(--dur-fast),transform var(--dur-fast)}
+.mini{flex-shrink:0;border:1px solid var(--input);background:var(--secondary);color:var(--secondary-foreground);font-family:var(--font);font-size:11px;font-weight:700;padding:0 10px;min-height:var(--control-h-lg);border-radius:var(--radius-md);cursor:pointer;transition:color var(--dur-fast),background var(--dur-fast),border-color var(--dur-fast),transform var(--dur-fast)}
 .mini:hover{background:color-mix(in srgb,var(--primary) 10%,color-mix(in srgb, var(--chalk) 6%, transparent));border-color:var(--border-strong)}
 .mini:active{transform:scale(.96)}
 .mini:disabled{opacity:.48;cursor:wait;transform:none}
