@@ -323,8 +323,11 @@ fn is_discovered_project(cfg: &AppConfig, project: &Path) -> bool {
 
 // 允许访问 roots 扫描到的项目，以及 Hook 已发现的动态项目。
 fn is_allowed_project(state: &AppState, project: &str) -> bool {
-    let target = expand(project);
-    cached_discover_all(state).contains(&target)
+    let target = platform::strip_device_prefix(&expand(project).to_string_lossy());
+    cached_discover_all(state).iter().any(|dir| {
+        let candidate = platform::strip_device_prefix(&dir.to_string_lossy());
+        platform::path_eq_ignore_case(&candidate, &target)
+    })
 }
 
 fn save_state(state: &AppState) -> Result<(), String> {
@@ -341,34 +344,75 @@ fn now_seconds() -> i64 {
         .unwrap_or_default()
 }
 
-// 按平台候选探测可用的 Python 命令（对齐上游 init.ts 的 PYTHON_CANDIDATES）。
-// 返回可执行的命令；全部探测失败时退回第一个候选（由调用方拿到 Command 错误）。
-fn resolve_python_command() -> &'static str {
-    for candidate in platform::python_candidates() {
-        if candidate == "py -3" {
-            // py 启动器需带参数探测，这里仅检查命令存在
-            if std::process::Command::new("py")
-                .arg("-3")
-                .arg("--version")
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false)
-            {
-                return candidate;
-            }
-            continue;
+fn split_python_candidate(candidate: &str) -> (String, Vec<String>) {
+    let mut parts = candidate.split_whitespace();
+    let exe = parts.next().unwrap_or(candidate).to_string();
+    let prefix_args = parts.map(str::to_string).collect();
+    (exe, prefix_args)
+}
+
+fn ensure_path_entries(current_path: Option<&str>, required: &[&str], sep: char) -> String {
+    let mut entries: Vec<String> = current_path
+        .unwrap_or("")
+        .split(sep)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    for &dir in required {
+        if !entries.iter().any(|e| e == dir) {
+            entries.push(dir.to_string());
         }
-        if std::process::Command::new(candidate)
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-        {
-            return candidate;
+    }
+    entries.join(&sep.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn apply_macos_path(cmd: &mut std::process::Command) {
+    let current = std::env::var("PATH").ok();
+    let merged = ensure_path_entries(
+        current.as_deref(),
+        &["/opt/homebrew/bin", "/usr/local/bin"],
+        ':',
+    );
+    cmd.env("PATH", merged);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn apply_macos_path(_cmd: &mut std::process::Command) {}
+
+fn python_search_candidates() -> Vec<&'static str> {
+    let mut candidates = Vec::new();
+    #[cfg(target_os = "macos")]
+    {
+        candidates.extend_from_slice(&[
+            "/opt/homebrew/bin/python3",
+            "/usr/local/bin/python3",
+            "/usr/bin/python3",
+        ]);
+    }
+    for c in platform::python_candidates() {
+        if !candidates.contains(&c) {
+            candidates.push(c);
+        }
+    }
+    candidates
+}
+
+// 按平台候选探测可用的 Python 命令（对齐上游 init.ts 的 PYTHON_CANDIDATES；macOS 额外探测 Homebrew/系统路径）。
+// 返回 (可执行文件, 前缀参数)，如 Windows 的 ("py", ["-3"])；全部探测失败时退回第一个候选。
+fn resolve_python_command() -> (String, Vec<String>) {
+    let candidates = python_search_candidates();
+    for &candidate in &candidates {
+        let (exe, prefix_args) = split_python_candidate(candidate);
+        let mut cmd = std::process::Command::new(&exe);
+        cmd.args(&prefix_args).arg("--version");
+        apply_macos_path(&mut cmd);
+        if cmd.output().map(|o| o.status.success()).unwrap_or(false) {
+            return (exe, prefix_args);
         }
     }
     // 全部失败：退回平台默认，让 Command 的 spawn 错误自然暴露给调用方
-    platform::python_candidates()[0]
+    split_python_candidate(platform::python_candidates()[0])
 }
 
 fn task_key(project: &str, task_id: &str) -> String {
@@ -1171,8 +1215,87 @@ fn get_task(state: State<AppState>, project: String, id: String) -> Result<TaskD
     Ok(TaskDetail { task, docs })
 }
 
+fn validate_archivable_task_name(task: &str) -> Result<(), String> {
+    let trimmed = task.trim();
+    if trimmed.is_empty()
+        || trimmed != task
+        || trimmed == "."
+        || trimmed == ".."
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+        || trimmed.starts_with("archive")
+    {
+        return Err(format!("无效的活跃任务名: {task}"));
+    }
+    Ok(())
+}
+
+fn strip_ansi(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' && chars.peek() == Some(&'[') {
+            chars.next();
+            for c in chars.by_ref() {
+                if ('@'..='~').contains(&c) {
+                    break;
+                }
+            }
+            continue;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn format_archive_command_output(stdout: &[u8], stderr: &[u8]) -> String {
+    let out = strip_ansi(&String::from_utf8_lossy(stdout));
+    let err = strip_ansi(&String::from_utf8_lossy(stderr));
+    let out = out.trim();
+    let err = err.trim();
+    match (out.is_empty(), err.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => out.to_string(),
+        (true, false) => err.to_string(),
+        (false, false) => format!("{out}\n{err}"),
+    }
+}
+
+const ARCHIVE_FLAG_PROFILES: [&[&str]; 3] = [
+    &["--no-commit", "--skip-branch-validation"],
+    &["--no-commit"],
+    &[],
+];
+
+fn is_unrecognized_args_error(output: &str) -> bool {
+    output
+        .to_ascii_lowercase()
+        .contains("unrecognized arguments")
+}
+
+fn run_archive_with_fallback<F>(mut runner: F) -> Result<(), String>
+where
+    F: FnMut(&[&str]) -> Result<Result<(), String>, String>,
+{
+    let mut last_err = String::new();
+    for (idx, flags) in ARCHIVE_FLAG_PROFILES.iter().enumerate() {
+        match runner(flags)? {
+            Ok(()) => return Ok(()),
+            Err(msg) => {
+                let has_next = idx + 1 < ARCHIVE_FLAG_PROFILES.len();
+                if has_next && is_unrecognized_args_error(&msg) {
+                    last_err = msg;
+                    continue;
+                }
+                return Err(format!("task.py archive 失败: {msg}"));
+            }
+        }
+    }
+    Err(format!("task.py archive 失败: {last_err}"))
+}
+
 // 校验一个任务是否可归档：项目允许、任务是活跃任务（在 .trellis/tasks/ 下、非 archive/）、
-// task.json 存在、项目带 task.py 脚本。返回 (project_dir, task_dir, script) 或错误原因。
+// task.json 存在、项目带 task.py 脚本。返回 (project_dir, script) 或错误原因。
 fn resolve_archivable_task(
     state: &AppState,
     project: &str,
@@ -1181,6 +1304,8 @@ fn resolve_archivable_task(
     if !is_allowed_project(state, project) {
         return Err("项目未在扫描目录中".into());
     }
+    /* 只允许归档活跃任务：拒绝空、路径穿越或 archive* 名称，避免重复移动或越界。 */
+    validate_archivable_task_name(task)?;
     let project_dir = expand(project);
     let task_dir = project_dir.join(".trellis").join("tasks").join(task);
     if !task_dir.is_dir() {
@@ -1189,7 +1314,6 @@ fn resolve_archivable_task(
     if !task_dir.join("task.json").is_file() {
         return Err(format!("任务缺少 task.json: {task}"));
     }
-    /* 只允许归档活跃任务：archive/ 下已是归档，避免重复移动。 */
     let script = project_dir.join(".trellis").join("scripts").join("task.py");
     if !script.is_file() {
         return Err(format!("项目缺少 Trellis 脚本: {}", script.display()));
@@ -1197,12 +1321,8 @@ fn resolve_archivable_task(
     Ok((project_dir, script))
 }
 
-// 把活跃任务归档到 .trellis/tasks/archive/<YYYY-MM>/：执行项目自带的 task.py archive。
-// 成功后 emit tasks-changed / runtime-reconciliation-needed 触发前端刷新（目录移动
-// 不一定落在 watch 的相关文件路径上，主动通知保证列表即时收敛）。
-#[tauri::command]
 /* WSL 观察模式下 archive 的 wsl.exe 命令参数（纯函数，可单测）：
-`wsl.exe -d <distro> --cd <linux_project> python3 <linux_script> archive <task>`。
+`wsl.exe -d <distro> --cd <linux_project> python3 <linux_script> archive <task> [flags...]`。
 返回 (distro, linux_project, linux_script)；任一路径无法转回 Linux 时 Err。 */
 fn wsl_archive_command(
     distro: &str,
@@ -1216,60 +1336,88 @@ fn wsl_archive_command(
     Ok((distro.to_string(), linux_project, linux_script))
 }
 
+fn wsl_distro_for_project(wsl_distro: Option<String>, project_dir: &Path) -> Option<String> {
+    let distro = wsl_distro?;
+    if crate::platform::is_wsl_unc(&project_dir.to_string_lossy()) {
+        Some(distro)
+    } else {
+        None
+    }
+}
+
+fn execute_archive_task(
+    project_dir: &Path,
+    script: &Path,
+    task: &str,
+    wsl_distro: Option<&str>,
+) -> Result<(), String> {
+    /* WSL 观察模式：仅当项目路径确实在 \\wsl$\<distro>\... 下时，经 wsl.exe 调用 WSL 内 Python。 */
+    if let Some(distro) = wsl_distro {
+        let (distro, linux_project, linux_script) = wsl_archive_command(
+            distro,
+            &project_dir.to_string_lossy(),
+            &script.to_string_lossy(),
+        )?;
+        return run_archive_with_fallback(|flags| {
+            let output = std::process::Command::new("wsl.exe")
+                .args(["-d", &distro])
+                .arg("--cd")
+                .arg(&linux_project)
+                .args(["python3", &linux_script, "archive", task])
+                .args(flags)
+                .output()
+                .map_err(|e| format!("执行 task.py archive 失败: {e}"))?;
+            if output.status.success() {
+                Ok(Ok(()))
+            } else {
+                Ok(Err(format_archive_command_output(
+                    &output.stdout,
+                    &output.stderr,
+                )))
+            }
+        });
+    }
+    // 按平台候选探测可用的 Python 命令（win32: python/python3/py -3；macOS 补齐 Homebrew/系统路径）
+    let (python_exe, python_prefix_args) = resolve_python_command();
+    run_archive_with_fallback(|flags| {
+        let mut cmd = std::process::Command::new(&python_exe);
+        cmd.args(&python_prefix_args)
+            .arg(script)
+            .args(["archive", task])
+            .args(flags)
+            .current_dir(project_dir);
+        apply_macos_path(&mut cmd);
+        let output = cmd
+            .output()
+            .map_err(|e| format!("执行 task.py archive 失败: {e}"))?;
+        if output.status.success() {
+            Ok(Ok(()))
+        } else {
+            Ok(Err(format_archive_command_output(
+                &output.stdout,
+                &output.stderr,
+            )))
+        }
+    })
+}
+
+// 把活跃任务归档到 .trellis/tasks/archive/<YYYY-MM>/：异步执行项目自带的 task.py archive。
+// 成功后 emit tasks-changed / runtime-reconciliation-needed 触发前端刷新（目录移动
+// 不一定落在 watch 的相关文件路径上，主动通知保证列表即时收敛）。
 #[tauri::command]
-fn archive_task(
+async fn archive_task(
     app: AppHandle,
-    state: State<AppState>,
+    state: State<'_, AppState>,
     project: String,
     task: String,
 ) -> Result<bool, String> {
     let (project_dir, script) = resolve_archivable_task(&state, &project, &task)?;
-    /* WSL 观察模式：项目在 \\wsl$\<distro>\... 下，task.py 只能由 WSL 内 Python
-    执行（Windows Python 无法跨 9P 运行 shebang/相对路径）。经 wsl.exe 调用，
-    路径转回 Linux 形式，cwd 用 --cd 设为 WSL 内项目目录。 */
-    if let Some(distro) = crate::platform::wsl_distro() {
-        let (distro, linux_project, linux_script) = wsl_archive_command(
-            &distro,
-            &project_dir.to_string_lossy(),
-            &script.to_string_lossy(),
-        )?;
-        let output = std::process::Command::new("wsl.exe")
-            .args(["-d", &distro])
-            .arg("--cd")
-            .arg(&linux_project)
-            .args(["python3", &linux_script, "archive", &task])
-            .output()
-            .map_err(|e| format!("执行 task.py archive 失败: {e}"))?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            return Err(format!(
-                "task.py archive 失败: {}{}",
-                if stdout.is_empty() { "" } else { &stdout },
-                if stderr.is_empty() { "" } else { &stderr }
-            ));
-        }
-        let _ = app.emit("tasks-changed", ());
-        let _ = app.emit("runtime-reconciliation-needed", ());
-        return Ok(true);
-    }
-    // 按平台候选探测可用的 Python 命令（win32: python/python3/py -3）
-    let python = resolve_python_command();
-    let output = std::process::Command::new(python)
-        .arg(script)
-        .args(["archive", &task])
-        .current_dir(&project_dir)
-        .output()
-        .map_err(|e| format!("执行 task.py archive 失败: {e}"))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        return Err(format!(
-            "task.py archive 失败: {}{}",
-            if stdout.is_empty() { "" } else { &stdout },
-            if stderr.is_empty() { "" } else { &stderr }
-        ));
-    }
+    let wsl_distro = wsl_distro_for_project(crate::platform::wsl_distro(), &project_dir);
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_archive_task(&project_dir, &script, &task, wsl_distro.as_deref())
+    })
+    .await
+    .map_err(|e| format!("执行 task.py archive 失败: {e}"))??;
     let _ = app.emit("tasks-changed", ());
     let _ = app.emit("runtime-reconciliation-needed", ());
     Ok(true)
@@ -2074,6 +2222,152 @@ mod tests {
             .unwrap_err();
         assert!(err.contains("缺少 Trellis 脚本"));
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn resolve_archivable_task_rejects_invalid_task_names() {
+        let (root, state) = archive_fixture("invalid-name");
+        let project = root.join("alpha");
+        for bad in [
+            "",
+            "  ",
+            ".",
+            "..",
+            "../other",
+            "a/b",
+            r"a\b",
+            "archive",
+            "archive/2026-08/old",
+            "archive-foo",
+        ] {
+            let err = resolve_archivable_task(&state, &project.to_string_lossy(), bad).unwrap_err();
+            assert!(
+                err.contains("无效的活跃任务名"),
+                "expected invalid name error for {bad:?}, got {err:?}"
+            );
+        }
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn strip_ansi_removes_escape_sequences() {
+        let raw = "\x1b[0;31mError: refusing to archive\x1b[0m\n\x1b[1;33mHint\x1b[0m";
+        assert_eq!(strip_ansi(raw), "Error: refusing to archive\nHint");
+        assert_eq!(strip_ansi("plain text"), "plain text");
+    }
+
+    #[test]
+    fn split_python_candidate_splits_py_launcher_args() {
+        assert_eq!(
+            split_python_candidate("py -3"),
+            ("py".to_string(), vec!["-3".to_string()])
+        );
+        assert_eq!(
+            split_python_candidate("python3"),
+            ("python3".to_string(), vec![])
+        );
+        assert_eq!(
+            split_python_candidate("/opt/homebrew/bin/python3"),
+            ("/opt/homebrew/bin/python3".to_string(), vec![])
+        );
+    }
+
+    #[test]
+    fn ensure_path_entries_appends_missing_without_duplicates() {
+        assert_eq!(
+            ensure_path_entries(
+                Some("/usr/bin:/bin"),
+                &["/opt/homebrew/bin", "/usr/local/bin"],
+                ':',
+            ),
+            "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin"
+        );
+        assert_eq!(
+            ensure_path_entries(
+                Some("/opt/homebrew/bin:/usr/bin"),
+                &["/opt/homebrew/bin", "/usr/local/bin"],
+                ':',
+            ),
+            "/opt/homebrew/bin:/usr/bin:/usr/local/bin"
+        );
+    }
+
+    #[test]
+    fn run_archive_with_fallback_handles_older_task_py_flags() {
+        // 1) Older task.py rejects --skip-branch-validation, accepts --no-commit
+        let mut seen: Vec<Vec<String>> = Vec::new();
+        let res = run_archive_with_fallback(|flags| {
+            seen.push(flags.iter().map(|s| (*s).to_string()).collect());
+            if flags.contains(&"--skip-branch-validation") {
+                Ok(Err(
+                    "usage: task.py archive ...\ntask.py: error: unrecognized arguments: --skip-branch-validation"
+                        .into(),
+                ))
+            } else {
+                Ok(Ok(()))
+            }
+        });
+        assert!(res.is_ok());
+        assert_eq!(
+            seen,
+            vec![
+                vec!["--no-commit", "--skip-branch-validation"],
+                vec!["--no-commit"],
+            ]
+        );
+
+        // 2) Very old task.py rejects both flags, succeeds with bare archive <task>
+        let mut seen2: Vec<Vec<String>> = Vec::new();
+        let res2 = run_archive_with_fallback(|flags| {
+            seen2.push(flags.iter().map(|s| (*s).to_string()).collect());
+            if !flags.is_empty() {
+                Ok(Err(format!(
+                    "error: unrecognized arguments: {}",
+                    flags.join(" ")
+                )))
+            } else {
+                Ok(Ok(()))
+            }
+        });
+        assert!(res2.is_ok());
+        assert_eq!(
+            seen2,
+            vec![
+                vec!["--no-commit", "--skip-branch-validation"],
+                vec!["--no-commit"],
+                vec![],
+            ]
+        );
+
+        // 3) Real archive failure does NOT fall back
+        let mut attempts = 0;
+        let err = run_archive_with_fallback(|_| {
+            attempts += 1;
+            Ok(Err("Error: archive destination already exists".into()))
+        })
+        .unwrap_err();
+        assert_eq!(attempts, 1);
+        assert!(err.contains("archive destination already exists"));
+    }
+
+    #[test]
+    fn wsl_distro_for_project_requires_wsl_unc_path() {
+        assert_eq!(
+            wsl_distro_for_project(
+                Some("Ubuntu".into()),
+                Path::new(r"\\wsl$\Ubuntu\home\alice\proj"),
+            )
+            .as_deref(),
+            Some("Ubuntu")
+        );
+        assert_eq!(
+            wsl_distro_for_project(Some("Ubuntu".into()), Path::new(r"C:\Users\alice\proj")),
+            None
+        );
+        assert_eq!(
+            wsl_distro_for_project(None, Path::new(r"\\wsl$\Ubuntu\home\alice\proj")),
+            None
+        );
     }
 
     /* ---------- Hook 端到端集成测试 ----------

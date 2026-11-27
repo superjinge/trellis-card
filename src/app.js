@@ -182,12 +182,12 @@ function displayActivity(activity, toolName, action, fallback, context) {
 function errMsg(e) {
   return typeof e === 'string' ? e : (e && e.message) || String(e);
 }
-function toast(msg) {
+function toast(msg, durationMs = 2200) {
   const el = $('toast');
   el.textContent = msg;
   el.classList.add('show');
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => el.classList.remove('show'), 2200);
+  toast._t = setTimeout(() => el.classList.remove('show'), durationMs);
 }
 /* aria-live 播报：只用于重要切换或需要介入的状态，不播报每条普通 activity */
 function announce(msg) {
@@ -2709,7 +2709,7 @@ function toggleTreeCollapse(key) {
   render();
 }
 /* 归档任务树中的任务：调用后端 task.py archive，成功后刷新列表。
-   只对已完成任务展示按钮；调用后按钮防抖，避免重复触发。 */
+   对未归档任务展示按钮；调用后按钮防抖，避免重复触发。 */
 async function archiveTreeTask(task, btn) {
   if (btn) {
     btn.disabled = true;
@@ -2725,7 +2725,10 @@ async function archiveTreeTask(task, btn) {
     if (state.showArchived) await ensureArchived(task.project);
     if (state.view === 'main') render();
   } catch (e) {
-    toast(`归档失败：${errMsg(e)}`);
+    console.error('[archive_task]', e);
+    const raw = errMsg(e).replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').trim();
+    const firstLine = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean)[0] || '未知错误';
+    toast(`归档失败：${firstLine}`, 5000);
   } finally {
     if (btn) {
       btn.disabled = false;
